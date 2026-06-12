@@ -17,22 +17,22 @@ function parabola!(nmin0::Integer, nmax0::Integer, para::Vector{Float64},
     scrch2 = zeros(Float64, Sweepsize.maxsweep)
     scrch3 = zeros(Float64, Sweepsize.maxsweep)
 
-    for n in nmin0:(nmax0 + 1)
+    for n in (nmin0-2):(nmax0 + 1)
         diffa[n] = a[n + 1] - a[n]
     end
 
-    for n in nmin0:nmax0
+    for n in (nmin0-1):(nmax0+1)
         da[n] = para[4] * diffa[n] + para[5] * diffa[n - 1]
         da[n] = copysign(min(abs(da[n]), 2.0 * abs(diffa[n - 1]), 2.0 * abs(diffa[n])), da[n])
     end
 
-    for n in nmin0:nmax0
+    for n in (nmin0-1):(nmax0+1)
         if diffa[n - 1] * diffa[n] < 0.0
             da[n] = 0.0
         end
     end
 
-    for n in nmin0:nmax0
+    for n in (nmin0-1):nmax0
         ar[n] = a[n] + para[1] * diffa[n] + para[2] * da[n + 1] + para[3] * da[n]
         al[n + 1] = ar[n]
     end

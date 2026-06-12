@@ -1,0 +1,274 @@
+# --------------------------------------------------------------------------
+#
+#    11111111      11      11    11      11                1111  
+#  1111    1111    11      11    11      11              111111  
+#  1111            11      11    11      11                1111  
+#    11111111      11      11    1111111111    ==          1111  
+#          1111     11    11     11      11                1111  
+#          1111    11    11      11      11                1111  
+#  1111    1111      11  11      11      11                1111  
+#    11111111         1111       11      11            1111111111
+#
+#
+#                        VIRGINIA HYDRODYNAMICS #1
+#
+# --------------------------------------------------------------------------
+# Julia port of vhone.f90
+# Main VH-1 driver loop for the julia_fvh1_8 code.
+cd(@__DIR__)
+
+include("vh1mods.jl")
+include("zonemod.jl")
+include("init.jl")
+include("prin.jl")
+include("dtcon.jl")
+include("stress.jl")
+include("mc3d.jl")
+include("sweepx.jl")
+include("sweepy.jl")
+include("sweepz.jl")
+
+using Dates
+using Random
+
+using .Global
+using .Zone
+using .Sweepsize
+
+function parse_indat()
+    prefix_val = ""
+    endtime_val = 0.0
+    tprin_val = 0.0
+
+    if isfile("indat")
+        for line in eachline("indat")
+            line = strip(line)
+            if isempty(line) || startswith(line, "!") || startswith(line, "&") || startswith(line, "/")
+                continue
+            end
+            for part in split(line, ',')
+                kv = split(part, '=')
+                if length(kv) == 2
+                    key = strip(lowercase(kv[1]))
+                    value = strip(kv[2])
+                    # Remove trailing '/' if present
+                    value = strip(replace(value, r"/\s*$" => ""))
+                    if key == "prefix"
+                        prefix_val = strip(value, ['\'', '"'])
+                    elseif key == "endtime"
+                        endtime_val = parse(Float64, value)
+                    elseif key == "tprin"
+                        tprin_val = parse(Float64, value)
+                    end
+                end
+            end
+        end
+    end
+
+    return prefix_val, endtime_val, tprin_val
+end
+
+function open_output_files()
+    return Dict{Int,IO}(
+        65 => open("rho_x.dat", "w"),
+        66 => open("rho_y.dat", "w"),
+        67 => open("rho_z.dat", "w"),
+        68 => open("vel_x.dat", "w"),
+        88 => open("vel_y.dat", "w"),
+        98 => open("vel_z.dat", "w"),
+        69 => open("temp_tran.dat", "w"),
+        70 => open("pixx_tran.dat", "w"),
+        71 => open("s_x.dat", "w"),
+        75 => open("energy.dat", "w"),
+        76 => open("radii.dat", "w"),
+        78 => open("entropy.dat", "w"),
+        79 => open("momentum.dat", "w"),
+        80 => open("pipi.dat", "w"),
+        81 => open("pipiim.dat", "w"),
+        82 => open("pi-spec.dat", "w"),
+        83 => open("rhokx.dat", "w")
+    )
+end
+
+function close_output_files(io_units::Dict{Int,<:IO})
+    for io in values(io_units)
+        close(io)
+    end
+    return nothing
+end
+
+function format_write(io::IO, args...)
+    println(io, join(args, " "))
+    return nothing
+end
+
+function vhone!()
+    Random.seed!(123456)
+    Global.ntrial = 0
+    Global.nacc = 0
+
+    Global.prefix, Global.endtime, Global.tprin = parse_indat()
+
+    if max(Zone.imax, Zone.jmax, Zone.kmax) + 12 > Sweepsize.maxsweep
+        error("maxsweep too small")
+    end
+    if Zone.ndim != 3
+        error("This is a 3d code")
+    end
+
+    io_units = open_output_files()
+    history_name = string(Global.prefix, "hst")
+    history_io = open(history_name, "w")
+    println(history_io, "History File for VH-1 simulation run on ", Dates.format(now(), "mm/dd/yyyy"))
+    println(history_io)
+
+    init!()
+    myprin!(io_units)
+
+    nprin = floor(Int, (Global.tprin + 0.001) / Global.dt)
+    icor = 40
+    iequ = 1
+    nk = 4
+    iconfmax = 5000
+
+    if icor > Int(Global.endtime / 2.0 / Global.dt) + iequ
+        error("icor too large")
+    end
+
+    Zone.spec .= 0.0
+    Zone.spec2 .= 0.0
+
+    iconf = 0
+    ispec = 0
+    ncycend = 100000
+
+    Arepixky = zeros(Float64, iconfmax, nk)
+    Aimpixky = zeros(Float64, iconfmax, nk)
+    cor = zeros(Float64, icor + 1, nk)
+    cori = zeros(Float64, icor + 1, nk)
+    cor2 = zeros(Float64, icor + 1, nk)
+    cori2 = zeros(Float64, icor + 1, nk)
+
+#   Main computational loop
+
+    while Global.ncycle < ncycend
+        iconf += 1
+        Global.ncycle += 2
+        Global.ncycp += 2
+        println("conf = ", iconf, " t = ", Global.time, " dt = ", Global.dt)
+
+        etot, ekin, eint = energy!(0.0, 0.0, 0.0)
+        stot, rtot = entropy!(0.0, 0.0)
+        rx, ry, rz = scalesize!(0.0, 0.0, 0.0)
+
+        ptot = zeros(Float64, 3)
+        pdipole = zeros(Float64, 3, 3)
+        mass, ptot, pdipole = momentum!(0.0, ptot, pdipole)
+        pixky!()
+
+        ispec += 1
+        for j in 1:Zone.jmax
+            Zone.spec[j] += Zone.repixky[j]^2 + Zone.impixky[j]^2
+            Zone.spec2[j] += (Zone.repixky[j]^2 + Zone.impixky[j]^2)^2
+        end
+        for k in 1:nk
+            Arepixky[iconf, k] = Zone.repixky[k]
+            Aimpixky[iconf, k] = Zone.impixky[k]
+        end
+
+        format_write(io_units[75], Global.time, etot, ekin, eint)
+        format_write(io_units[76], Global.time, rx, ry, rz)
+        format_write(io_units[78], Global.time, stot, rtot, stot / rtot)
+        format_write(io_units[79], Global.time, mass, ptot[1] / mass, pdipole[1, 2] / mass, Zone.impixky[1])
+        format_write(io_units[83], Global.time, Zone.rhokx[1], Zone.rhokx[2], Zone.rhokx[3])
+
+#   Operator splitting: xyz followed by zyx 
+
+        sweepx!()
+        sweepy!()
+        sweepz!()
+
+        Global.time += Global.dt
+        Global.timep += Global.dt
+
+        sweepz!()
+        sweepy!()
+        sweepx!()
+
+        Global.time += Global.dt
+        Global.timep += Global.dt
+
+        vcon!()
+        Global.dt = Global.dtfix
+
+#   Double Monte Carlo step 
+
+        mc3d!()
+        mc3d!()
+
+        vcon!()
+
+        if Global.ncycp >= nprin
+            myprin!(io_units)
+            Global.ncycp = 0
+        end
+
+        if Global.time > Global.endtime
+            Global.ncycle = ncycend
+        end
+    end
+
+#   End of main computational loop
+
+    isample = 0
+    for i in iequ:(iconf - icor)
+        isample += 1
+        for j in 0:icor
+            for k in 1:nk
+                recor = Arepixky[i, k] * Arepixky[i + j, k] + Aimpixky[i, k] * Aimpixky[i + j, k]
+                imcor = Arepixky[i, k] * Aimpixky[i + j, k] - Aimpixky[i, k] * Arepixky[i + j, k]
+                cor[j + 1, k] += recor
+                cori[j + 1, k] += imcor
+                cor2[j + 1, k] += recor^2
+                cori2[j + 1, k] += imcor^2
+            end
+        end
+    end
+
+    for j in 0:icor
+        for k in 1:nk
+            cor[j+1,k]  = cor[j+1,k]/float(isample)
+            cori[j+1,k] = cori[j+1,k]/float(isample)
+            cor2[j+1,k] = cor2[j+1,k]/float(isample)
+            cori2[j+1,k] = cori2[j+1,k]/float(isample)
+        end
+        cork1 = cor[j + 1, 1] / cor[1, 1]
+        cork2 = cor[j + 1, 2] / cor[1, 2]
+        cork3 = cor[j + 1, 3] / cor[1, 3]
+        dc1 = sqrt((cor2[j + 1, 1] - cor[j + 1, 1]^2) / isample) / cor[1, 1]
+        dc2 = sqrt((cor2[j + 1, 2] - cor[j + 1, 2]^2) / isample) / cor[1, 2]
+        dc3 = sqrt((cor2[j + 1, 3] - cor[j + 1, 3]^2) / isample) / cor[1, 3]
+        format_write(io_units[80], 2.0 * Global.dt * j, cork1, dc1, cork2, dc2, cork3, dc3)
+
+        cork1 = cori[j + 1, 1] / cor[1, 1]
+        cork2 = cori[j + 1, 2] / cor[1, 2]
+        cork3 = cori[j + 1, 3] / cor[1, 3]
+        dc1 = sqrt((cori2[j + 1, 1] - cori[j + 1, 1]^2) / isample) / cor[1, 1]
+        dc2 = sqrt((cori2[j + 1, 2] - cori[j + 1, 2]^2) / isample) / cor[1, 2]
+        dc3 = sqrt((cori2[j + 1, 3] - cori[j + 1, 3]^2) / isample) / cor[1, 3]
+        format_write(io_units[81], 2.0 * Global.dt * j, cork1, dc1, cork2, dc2, cork3, dc3)
+    end
+
+    for j in 1:Zone.jmax
+        Zone.spec[j] /= ispec
+        Zone.spec2[j] /= ispec
+        format_write(io_units[82], j, Zone.spec[j], sqrt((Zone.spec2[j] - Zone.spec[j]^2) / ispec))
+    end
+
+    println("acceptance rate ", Float64(Global.nacc) / Float64(Global.ntrial))
+
+    close(history_io)
+    close_output_files(io_units)
+
+    return nothing
+end

@@ -1,0 +1,68 @@
+#!/bin/tcsh
+a2ps -1 -o vhone.ps   vhone.jl
+a2ps -1 -o init.ps    init.jl
+a2ps -1 -o dtcon.ps   dtcon.jl
+a2ps -1 -o stress.ps  stress.jl
+a2ps -1 -o sweepx.ps  sweepx.jl
+a2ps -1 -o sweepy.ps  sweepy.jl
+a2ps -1 -o sweepz.ps  sweepz.jl
+a2ps -1 -o mc3d.ps mc3d.jl
+a2ps -1 -o prin.ps    prin.jl
+ps2pdf vhone.ps
+ps2pdf init.ps 
+ps2pdf dtcon.ps
+ps2pdf stress.ps
+ps2pdf sweepx.ps
+ps2pdf sweepy.ps 
+ps2pdf sweepz.ps
+ps2pdf mc3d.ps
+ps2pdf prin.ps 
+pdftk vhone.pdf init.pdf dtcon.pdf stress.pdf sweepx.pdf sweepy.pdf sweepz.pdf mc3d.pdf prin.pdf output vhonemain.pdf
+rm vhone.ps
+rm init.ps 
+rm dtcon.ps
+rm stress.ps
+rm sweepx.ps
+rm sweepy.ps 
+rm sweepz.ps
+rm mc3d.ps
+rm prin.ps 
+rm vhone.pdf
+rm init.pdf
+rm dtcon.pdf
+rm stress.pdf
+rm sweepx.pdf
+rm sweepy.pdf
+rm sweepz.pdf
+rm mc3d.pdf
+rm prin.pdf 
+a2ps -1 -o ppmlr.ps    ppmlr.jl
+a2ps -1 -o boundary.ps boundary.jl
+a2ps -1 -o parabola.ps parabola.jl
+a2ps -1 -o states.ps   states.jl
+a2ps -1 -o evolve.ps   evolve.jl
+a2ps -1 -o remap.ps    remap.jl
+a2ps -1 -o vh1state.ps vh1state.jl
+ps2pdf ppmlr.ps    
+ps2pdf boundary.ps 
+ps2pdf parabola.ps 
+ps2pdf states.ps   
+ps2pdf evolve.ps   
+ps2pdf remap.ps
+ps2pdf vh1state.ps
+pdftk  ppmlr.pdf boundary.pdf  parabola.pdf  states.pdf  evolve.pdf  remap.pdf   vh1state.pdf output ppmlrmain.pdf
+rm ppmlr.ps    
+rm boundary.ps 
+rm parabola.ps 
+rm states.ps   
+rm evolve.ps   
+rm remap.ps   
+rm ppmlr.pdf    
+rm boundary.pdf 
+rm parabola.pdf  
+rm states.pdf   
+rm evolve.pdf      
+rm remap.pdf
+rm vh1state.pdf
+pdftk vhonemain.pdf ppmlrmain.pdf output vh1-all.pdf
+rm vhonemain.pdf ppmlrmain.pdf

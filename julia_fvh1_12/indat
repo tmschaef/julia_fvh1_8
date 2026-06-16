@@ -1,0 +1,5 @@
+&hinput
+  prefix = 'run1',
+  endtime = 5.0,
+  tprin = 1.0
+/
